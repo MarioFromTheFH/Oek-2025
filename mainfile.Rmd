@@ -1,0 +1,196 @@
+---
+title: "Ökonometrie Aufgabe - Datensatz 2"
+output: html_notebook
+---
+
+Includes und aktuelles Verzeichnis setzen...
+
+```{r}
+library(readr)
+library(dplyr)
+library(readxl)
+library(janitor)
+library(here)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(GGally)
+library(tsibble)
+library(feasts)
+library(tseries)
+library(fable)
+library(fabletools)
+```
+
+Einlesen des Datensatzes
+
+```{r}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+df <- read.csv(here("Datensatz2.csv"), sep = ",")
+```
+
+Kleine Überprüfung
+
+```{r}
+dim(df)
+head(df)
+```
+
+Datenbereinigung/Überprüfung
+
+```{r}
+
+df <- df %>%
+  rename(date = 1) %>%              # erste Spalte als date (wenn nötig)
+  mutate(date = as.Date(date)) %>%
+  arrange(date) %>%
+  distinct(date, .keep_all = TRUE)
+
+
+# Check: Sind die Tage korrekt dokumentiert
+all_dates <- tibble(date = seq(min(df$date), max(df$date), by = "day"))
+gaps <- anti_join(all_dates, df, by = "date")
+nrow(gaps)  # >0 --> TAGE FEHLEN!!
+# Fehlende Werte pro Spalte
+df %>% summarise(across(everything(), ~sum(is.na(.))))
+
+# Duplikate im Datum
+df %>% count(date) %>% filter(n > 1)
+```
+
+```{r}
+glimpse(df)
+summary(df)
+```
+
+Prüfen auf Plausibilität
+
+```{r}
+df %>% summarise(
+  min_temp = min(meantemp, na.rm = TRUE),
+  max_temp = max(meantemp, na.rm = TRUE),
+  min_hum  = min(humidity, na.rm = TRUE),
+  max_hum  = max(humidity, na.rm = TRUE),
+  min_wind = min(wind_speed, na.rm = TRUE),
+  max_wind = max(wind_speed, na.rm = TRUE),
+  min_pres = min(meanpressure, na.rm = TRUE),
+  max_pres = max(meanpressure, na.rm = TRUE)
+)
+
+# Messfehler/Falsche Daten/etc
+df %>% filter(humidity < 0 | humidity > 100)
+df %>% filter(wind_speed < 0)
+
+```
+
+Einfache Plots
+
+```{r}
+ggplot(df, aes(date, meantemp)) +  
+  geom_line() +
+  labs(title = "Zeitreihe: Durchschnittstemperatur an Datum", x = NULL, y = NULL)
+
+ggplot(df, aes(date, humidity)) +  
+  geom_line() +
+  labs(title = "Zeitreihe: Luftfeuchtiggeit an Datum", x = NULL, y = NULL)
+
+ggplot(df, aes(date, wind_speed)) +  
+  geom_line() +
+  labs(title = "Zeitreihe: Wind an Datum", x = NULL, y = NULL)
+```
+
+Ausreißer als Histogram
+
+```{r}
+ggplot(df, aes(meantemp)) + geom_histogram(bins = 60)
+ggplot(df, aes(humidity)) + geom_histogram(bins = 60)
+ggplot(df, aes(wind_speed)) + geom_histogram(bins = 60)
+
+```
+
+Korrelationen/Auto-Korrelation
+
+```{r}
+tsb <- df %>% as_tsibble(index = date)
+
+adf.test(na.omit(df$meantemp))      # H0: unit root (nicht stationär)
+kpss.test(na.omit(df$meantemp))     # H0: stationär
+```
+
+```{r}
+df %>%
+  select(meantemp, humidity, wind_speed, meanpressure) %>%
+  GGally::ggpairs()
+```
+
+ACF/Saison (*stimates of the autocovariance or autocorrelation function)*
+
+```{r}
+tsb <- df %>% as_tsibble(index = date)
+
+tsb %>% ACF(meantemp) %>% autoplot()
+tsb %>% ACF(humidity) %>% autoplot()
+tsb %>%
+  model(STL(meantemp ~ season(window = "periodic"))) %>%
+  components() %>%
+  autoplot()
+```
+
+Multivariate Analysen
+
+```{r}
+
+
+tsb <- df %>% as_tsibble(index = date)
+
+split_date <- as.Date("2016-12-31")
+train <- tsb %>% filter(date <= split_date)
+test  <- tsb %>% filter(date >  split_date)
+```
+
+```{r}
+fit_base <- train %>%
+  model(
+    naive = NAIVE(meantemp),
+    snaive = SNAIVE(meantemp),
+    drift = RW(meantemp ~ drift())
+  )
+
+fc_base <- fit_base %>% forecast(h = nrow(test))
+accuracy(fc_base, test)
+
+```
+
+Baselines:
+
+```{r}
+fit <- train %>%
+  model(
+    arima = ARIMA(meantemp),
+    ets   = ETS(meantemp)
+  )
+
+fc <- fit %>% forecast(h = nrow(test))
+autoplot(fc, train) + autolayer(test, meantemp)
+accuracy(fc, test)
+
+
+```
+
+```{r}
+fit_x <- train %>%
+  model(arimax = ARIMA(meantemp ~ humidity + wind_speed + meanpressure))
+
+fc_x <- fit_x %>% forecast(new_data = test)
+accuracy(fc_x, test)
+
+fit_x %>% gg_tsresiduals()
+fit_x %>% augment() %>% features(.innov, ljung_box, lag = 30)
+
+```
+
+Regressionen:
+
+```{r}
+
+```
