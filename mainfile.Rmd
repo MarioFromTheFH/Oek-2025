@@ -20,6 +20,7 @@ library(feasts)
 library(tseries)
 library(fable)
 library(fabletools)
+library(purrr)
 ```
 
 Einlesen des Datensatzes
@@ -86,9 +87,19 @@ df %>% filter(wind_speed < 0)
 Einfache Plots
 
 ```{r}
-ggplot(df, aes(date, meantemp)) +  
-  geom_line() +
-  labs(title = "Zeitreihe: Durchschnittstemperatur an Datum", x = NULL, y = NULL)
+df_seg <- df %>%
+  arrange(date) %>%
+  mutate(temp_seg = (meantemp + lag(meantemp))/2) %>%
+  filter(!is.na(temp_seg))
+
+ggplot(df_seg, aes(date, meantemp)) +
+  geom_line(aes(color = temp_seg), linewidth = 0.8) +
+  scale_color_gradientn(
+    colours = c("blue", "deepskyblue", "gold", "orange", "red"),
+    values  = scales::rescale(c(min(df$meantemp, na.rm=TRUE), 10, 20, 30, max(df$meantemp, na.rm=TRUE))),
+    name = "°C"
+  ) +
+  labs(title = "Zeitreihe: Durchschnittstemperatur", x = NULL, y = NULL)
 
 ggplot(df, aes(date, humidity)) +  
   geom_line() +
@@ -102,10 +113,42 @@ ggplot(df, aes(date, wind_speed)) +
 Ausreißer als Histogram
 
 ```{r}
-ggplot(df, aes(meantemp)) + geom_histogram(bins = 60)
+library(ggplot2)
+
+ggplot(df, aes(meantemp, fill = after_stat(x))) +
+  geom_histogram(bins = 60, color = "white") +
+  scale_fill_gradientn(
+    colours = c("blue", "deepskyblue", "gold", "orange", "red"),
+    values  = scales::rescale(c(min(df$meantemp, na.rm=TRUE), 10, 20, 30, max(df$meantemp, na.rm=TRUE))),
+    name = "°C"
+  ) +
+  labs(title = "Histogramm: Durchschnittstemperatur", x = "meantemp (°C)", y = "Anzahl")
+
+
 ggplot(df, aes(humidity)) + geom_histogram(bins = 60)
 ggplot(df, aes(wind_speed)) + geom_histogram(bins = 60)
 
+```
+
+Regressionsbaseline
+
+```{r}
+df_reg <- read_csv("Datensatz2.csv") %>%
+  mutate(date = as.Date(date)) %>%
+  arrange(date)
+
+df_reg <- df_reg %>%
+  mutate(
+    t = row_number(),
+    month = factor(month(date)),
+    dow = factor(wday(date, label = TRUE, week_start = 1))
+  )
+m_ols <- lm(meantemp ~ humidity + wind_speed + meanpressure +
+              poly(t, 2) + month + dow,
+            data = df_reg)
+
+summary(m_ols)
+acf(residuals(m_ols))   # sehr oft: deutliche Autokorrelation
 ```
 
 Korrelationen/Auto-Korrelation
@@ -123,74 +166,126 @@ df %>%
   GGally::ggpairs()
 ```
 
-ACF/Saison (*stimates of the autocovariance or autocorrelation function)*
+# Seasonal Decomposition of Time Series by Loess/Saison
 
 ```{r}
 tsb <- df %>% as_tsibble(index = date)
 
-tsb %>% ACF(meantemp) %>% autoplot()
-tsb %>% ACF(humidity) %>% autoplot()
 tsb %>%
   model(STL(meantemp ~ season(window = "periodic"))) %>%
   components() %>%
   autoplot()
 ```
 
-Multivariate Analysen
+Multivariate Analysen:
 
 ```{r}
 
-
-tsb <- df %>% as_tsibble(index = date)
-
-split_date <- as.Date("2016-12-31")
-train <- tsb %>% filter(date <= split_date)
-test  <- tsb %>% filter(date >  split_date)
 ```
 
+Regression
+
 ```{r}
-fit_base <- train %>%
-  model(
-    naive = NAIVE(meantemp),
-    snaive = SNAIVE(meantemp),
-    drift = RW(meantemp ~ drift())
+
+df_long <- df %>%
+  pivot_longer(cols = c(meantemp, humidity, wind_speed, meanpressure),
+               names_to = "variable", values_to = "value")
+
+ggplot(df_long, aes(date, value)) +
+  geom_line(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE) +   # Regressionskurve + Konfidenzband
+  facet_wrap(~ variable, scales = "free_y", ncol = 1) +
+  labs(title = "Zeitreihen mit linearer Regressionskurve", x = NULL, y = NULL)
+
+```
+
+Sehr fad, da saisonal...
+
+Polynomial
+
+```{r}
+ggplot(df_long, aes(date, value)) +
+  geom_line(alpha = 0.6) +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 3), se = TRUE) +
+  facet_wrap(~ variable, scales = "free_y", ncol = 1) +
+  labs(title = "Zeitreihen mit polynomialer Regressionskurve (Grad 3)", x = NULL, y = NULL)
+
+```
+
+Genauso fad, da immer noch saisonal.
+
+Fazit: Regressionen machen bei saisonalen Daten keinen Spaß.
+
+2.  Versuch: Glättungen pro Jahr
+
+```{r}
+df_long <- df %>%
+  mutate(
+    date = as.Date(date),
+    year = year(date),
+    doy  = yday(date)
+  ) %>%
+  # optional: 29. Februar entfernen, damit alle Jahre vergleichbar sind
+  filter(!(month(date) == 2 & day(date) == 29)) %>%
+  pivot_longer(cols = c(meantemp, humidity, wind_speed, meanpressure),
+               names_to = "variable", values_to = "value")
+
+grid <- expand_grid(
+  variable = unique(df_long$variable),
+  year     = sort(unique(df_long$year)),
+  doy      = 1:365
+)
+
+fit_year_curve <- function(d) {
+  d <- d %>% filter(!is.na(value), !is.na(doy))
+  n <- nrow(d)
+  nd <- n_distinct(d$doy)
+
+  # Wenn zu wenig Daten: simpler Trend statt LOESS
+  if (n < 20 || nd < 20) {
+    return(lm(value ~ doy, data = d))
+  }
+
+  # Adaptive Nachbarschaft: mindestens ~30 Punkte im Fenster
+  span <- max(0.2, 30 / n)
+
+  tryCatch(
+    loess(value ~ doy, data = d, span = span, degree = 1, na.action = na.exclude),
+    error = function(e) lm(value ~ doy, data = d)
+  )
+}
+
+# Modelle pro (variable, year)
+fits <- df_long %>%
+  group_by(variable, year) %>%
+  nest() %>%
+  mutate(model = map(data, fit_year_curve))
+
+
+# Vorhersagen auf gemeinsamer doy-Skala
+pred <- fits %>%
+  select(variable, year, model) %>%
+  left_join(grid, by = c("variable", "year")) %>%
+  mutate(
+    fitted = map2_dbl(model, doy, ~ predict(.x, newdata = data.frame(doy = .y)))
+  ) %>%
+  select(variable, year, doy, fitted)
+
+# “Sinnvolle Kurve” ableiten: z.B. Mittelwert + Unsicherheitsband pro doy
+season_curve <- pred %>%
+  group_by(variable, doy) %>%
+  summarise(
+    mean = mean(fitted, na.rm = TRUE),
+    lo   = quantile(fitted, 0.10, na.rm = TRUE),
+    hi   = quantile(fitted, 0.90, na.rm = TRUE),
+    .groups = "drop"
   )
 
-fc_base <- fit_base %>% forecast(h = nrow(test))
-accuracy(fc_base, test)
-
-```
-
-Baselines:
-
-```{r}
-fit <- train %>%
-  model(
-    arima = ARIMA(meantemp),
-    ets   = ETS(meantemp)
-  )
-
-fc <- fit %>% forecast(h = nrow(test))
-autoplot(fc, train) + autolayer(test, meantemp)
-accuracy(fc, test)
-
-
-```
-
-```{r}
-fit_x <- train %>%
-  model(arimax = ARIMA(meantemp ~ humidity + wind_speed + meanpressure))
-
-fc_x <- fit_x %>% forecast(new_data = test)
-accuracy(fc_x, test)
-
-fit_x %>% gg_tsresiduals()
-fit_x %>% augment() %>% features(.innov, ljung_box, lag = 30)
-
-```
-
-Regressionen:
-
-```{r}
-
+ggplot() +
+  geom_line(data = pred, aes(doy, fitted, group = year), alpha = 0.15) +
+  geom_ribbon(data = season_curve, aes(doy, ymin = lo, ymax = hi), alpha = 0.2) +
+  geom_line(data = season_curve, aes(doy, mean), linewidth = 1) +
+  facet_wrap(~ variable, scales = "free_y", ncol = 1) +
+  labs(title = "Jahresweise Regression (LOESS) und daraus abgeleitete typische Saisonkurve",
+       x = "Tag im Jahr", y = NULL)
 ```
