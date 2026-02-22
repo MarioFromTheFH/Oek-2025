@@ -64,7 +64,44 @@ glimpse(df)
 summary(df)
 ```
 
-Prüfen auf Plausibilität
+## Deskriptive Bescheibung des Datensatzes
+
+### Basis
+
+Der Datensatz umfasst 1462 Beobachtungen im Zeitraum vom 1.1.2013. bis 1.1.2017. Es handelt sich um täglichen Wetterdaten das heißt, dass die Beobachtungseinheit ist ein einzelner Kalendartag
+
+Die Daten sind bereinigt und überprüft wurde:
+
+-   das Datum ist in korektes Format,
+
+-   die daten sind chonologisch soritiert,
+
+-   doppelte Datumsangabe ist entfernt,
+
+-   und letztes geprüft wurde ob fehlende Kalendartage existieren.
+
+Die gesamte Überprüfung zeigt, dass keine Felhende Tage, Duplikate im Datum und keine Fehlende Werte (NA) in Variablen gibt.
+
+Damit ist der Datensatz vollstandig und konsistent strukturiert.
+
+### Merkmalsbeschreibung
+
+| Merkmale     | Bedeutung              | Skalenniveau | Einheit |
+|--------------|------------------------|--------------|---------|
+| meantemp     | Durchschnitstemperatur | metrisch     | °C      |
+| humidity     | Luftfeuchtigkeit       | metrisch     | \%      |
+| wind_speed   | Windgeschwindigkeit    | metrisch     | km/h    |
+| meanpressure | Luftdruck              | metrisch     | hPa     |
+
+Alle Variable sind metrisch skaliert und stetig
+
+### Lage- und Steuerungmaße
+
+Die Durchschnittstemperatur beträgt im Mittel 25,50 °C. Die Werte befident sich zwischen 6.00 °C und 38.71°C, zeigt deutliche saisonale Schwankugen.
+
+Die Luftfeuchtikeit weist einen Mittelwert von 60.77% und varriert zwischen 13.43% und 100%. Das ist eine hohe Spannweite und weist auf unteschielische klimatische Bedigungen im Jahresverlauf hin.
+
+Besonders affällig ist der Luftdruck, weil der Median bei 1008,56 hPa liegt und das erste sowie dritte Quartil in einem möglichen Bereich liegen, treten Extremwerte von -3,04 hPa sowie 7679 hPa auf. Prüfen auf Plausibilität
 
 ```{r}
 df %>% summarise(
@@ -83,6 +120,26 @@ df %>% filter(humidity < 0 | humidity > 100)
 df %>% filter(wind_speed < 0)
 
 ```
+
+Zur genaueren Beurteilung der Variabilität wurden Standardabweichung und Varianz berechnet.
+
+### Temperatur (meantemp)
+
+Die Temperatur weist eine moderate Streuung auf.\
+Die Standardabweichung von 7,35 °C zeigt deutliche Schwankungen um den Mittelwert, was mit der visuell erkennbaren saisonalen Struktur konsistent ist.\
+Die Varianz bleibt jedoch in einem realistischen Bereich und deutet nicht auf extreme Instabilität hin.
+
+### Windgeschwindigkeit (wind_speed)
+
+Die extrem hohe Varianz des Luftdrucks ist auffällig.\
+Sie wird offensichtlich durch einzelne extreme Ausreißer verursacht.\
+Da typische atmosphärische Druckwerte im Bereich von etwa 950–1050 hPa liegen, sind diese Extremwerte nicht plausibel.
+
+### Luftdruck (meanpressure)
+
+Die extrem hohe Varianz des Luftdrucks ist auffällig.\
+Sie wird offensichtlich durch einzelne extreme Ausreißer verursacht.\
+Da typische atmosphärische Druckwerte im Bereich von etwa 950–1050 hPa liegen, sind diese Extremwerte nicht plausibel.
 
 Einfache Plots
 
@@ -290,38 +347,39 @@ ggplot() +
        x = "Tag im Jahr", y = NULL)
 ```
 
----
+------------------------------------------------------------------------
 
----
+------------------------------------------------------------------------
 
 ## 4) Evaluierung der Zeitreihenanalyse
 
 In diesem finalen Schritt wird die Güte der berechneten Modelle bewertet. Da der Datensatz **quantitative Daten** auf einem **metrischen Skalenniveau** enthält, erfolgt die Evaluierung über standardisierte statistische Fehlermaße.
 
 ### 4.1 Vergleich der Prognosegüte (Accuracy)
+
 Zur Beurteilung der Vorhersagegenauigkeit der Zielvariable `meantemp` vergleichen wir die Modelle **SNAIVE**, **ETS** und **ARIMA** anhand der letzten 90 Tage des Datensatzes. Dabei werden folgende **metrische Fehlermaße** herangezogen:
 
-* **RMSE (Root Mean Squared Error):** Dieses Maß gewichtet größere Abweichungen stärker und dient als primärer Indikator für die Präzision der Temperaturprognose.
-* **MAE (Mean Absolute Error):** Er gibt den durchschnittlichen absoluten Fehler an und ist robuster gegenüber vereinzelten Ausreißern.
+-   **RMSE (Root Mean Squared Error):** Dieses Maß gewichtet größere Abweichungen stärker und dient als primärer Indikator für die Präzision der Temperaturprognose.
+-   **MAE (Mean Absolute Error):** Er gibt den durchschnittlichen absoluten Fehler an und ist robuster gegenüber vereinzelten Ausreißern.
 
 | Modell | RMSE | MAE | MPE | MAPE | MASE | RMSSE | ACF1 | Theil's U |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|
 | **SNAIVE** | 3.597 | 2.871 | -9.006 | 18.067 | 1.000 | 1.000 | 0.880 | 1.003 |
 | **ETS** | 2.503 | 1.956 | -3.733 | 12.353 | 0.681 | 0.696 | 0.528 | 0.692 |
 | **ARIMA** | **2.356** | **1.815** | **-3.136** | **11.454** | **0.632** | **0.655** | **0.469** | **0.654** |
+
 *Tabelle 1: Statistische Fehlermaße des Test-Sets basierend auf der Modellprognose.*
 
-
-
-* **Modell-Ranking:** Das Modell mit dem niedrigsten RMSE wird als das leistungsstärkste identifiziert. In der vorliegenden Analyse liefert das **ARIMA-Modell** mit einem RMSE von **2.356** die präzisesten Ergebnisse.
+-   **Modell-Ranking:** Das Modell mit dem niedrigsten RMSE wird als das leistungsstärkste identifiziert. In der vorliegenden Analyse liefert das **ARIMA-Modell** mit einem RMSE von **2.356** die präzisesten Ergebnisse.
 
 ### 4.2 Voraussetzungen und Modellvalidität
+
 Ein Modell gilt ökonometrisch als valide, wenn es die systematischen Informationen der Zeitreihe vollständig extrahiert hat:
 
-* **Residuenanalyse:** Mittels ACF-Plots wurde sichergestellt, dass die Residuen (Fehler) "White Noise" darstellen und keine verwertbaren Muster mehr enthalten.
-* **Stationarität:** Da die Variable `meantemp` laut **ADF- und KPSS-Tests** ursprünglich **nicht stationär** war, ist die Fähigkeit des ARIMA-Modells zur Differenzierung entscheidend für die Validität der Ergebnisse.
-* **Multivariate Aspekte:** Die starke negative Korrelation zwischen Temperatur und Luftfeuchtigkeit ($\approx -0.572$) stützt die Plausibilität der Modellvorhersagen im meteorologischen Kontext.
+-   **Residuenanalyse:** Mittels ACF-Plots wurde sichergestellt, dass die Residuen (Fehler) "White Noise" darstellen und keine verwertbaren Muster mehr enthalten.
+-   **Stationarität:** Da die Variable `meantemp` laut **ADF- und KPSS-Tests** ursprünglich **nicht stationär** war, ist die Fähigkeit des ARIMA-Modells zur Differenzierung entscheidend für die Validität der Ergebnisse.
+-   **Multivariate Aspekte:** Die starke negative Korrelation zwischen Temperatur und Luftfeuchtigkeit ($\approx -0.572$) stützt die Plausibilität der Modellvorhersagen im meteorologischen Kontext.
 
 ### 4.3 Fazit
-Die Evaluierung bestätigt, dass das gewählte Modell die ausgeprägte **jährliche Saisonalität** im Zeitraum von 2013 bis 2017 erfolgreich abbildet. Das ARIMA-Modell erzielt mit einem **Theil's U von 0.654** eine deutlich höhere Prognosegüte als der naive Benchmark. Durch die methodisch korrekte Handhabung der Autokorrelation erzielen wir eine signifikant höhere Genauigkeit als bei einfachen Verfahren.
 
+Die Evaluierung bestätigt, dass das gewählte Modell die ausgeprägte **jährliche Saisonalität** im Zeitraum von 2013 bis 2017 erfolgreich abbildet. Das ARIMA-Modell erzielt mit einem **Theil's U von 0.654** eine deutlich höhere Prognosegüte als der naive Benchmark. Durch die methodisch korrekte Handhabung der Autokorrelation erzielen wir eine signifikant höhere Genauigkeit als bei einfachen Verfahren.
