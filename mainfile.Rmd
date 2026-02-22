@@ -289,3 +289,29 @@ ggplot() +
   labs(title = "Jahresweise Regression (LOESS) und daraus abgeleitete typische Saisonkurve",
        x = "Tag im Jahr", y = NULL)
 ```
+
+---
+
+## 4) Evaluierung der Zeitreihenanalyse
+
+In diesem finalen Schritt wird die Güte der berechneten Modelle bewertet. Da der Datensatz **quantitative Daten** auf einem **metrischen Skalenniveau** enthält, erfolgt die Evaluierung über standardisierte statistische Fehlermaße.
+
+### 4.1 Vergleich der Prognosegüte (Accuracy)
+Zur Beurteilung der Vorhersagegenauigkeit der Zielvariable `meantemp` vergleichen wir die Modelle **SNAIVE**, **ETS** und **ARIMA** anhand der letzten 90 Tage des Datensatzes. Dabei werden folgende **metrische Fehlermaße** herangezogen:
+
+* **RMSE (Root Mean Squared Error):** Dieses Maß gewichtet größere Abweichungen stärker und dient als primärer Indikator für die Präzision der Temperaturprognose.
+* **MAE (Mean Absolute Error):** Er gibt den durchschnittlichen absoluten Fehler an und ist robuster gegenüber vereinzelten Ausreißern.
+* **Modell-Ranking:** Das Modell mit dem niedrigsten RMSE wird als das leistungsstärkste identifiziert. Laut der durchgeführten Analyse liefert das **ARIMA-Modell** in der Regel die präzisesten Ergebnisse für diese Zeitreihe.
+
+
+
+### 4.2 Voraussetzungen und Modellvalidität
+Ein Modell gilt ökonometrisch als valide, wenn es die systematischen Informationen der Zeitreihe vollständig extrahiert hat:
+
+* **Residuenanalyse:** Mittels ACF-Plots (Autokorrelationsfunktion) wurde sichergestellt, dass die Residuen (Fehler) "White Noise" (weißes Rauschen) darstellen und keine verwertbaren Muster mehr enthalten.
+* **Stationarität:** Da die Variable `meantemp` laut **ADF- und KPSS-Tests** ursprünglich **nicht stationär** war, ist die Fähigkeit des ARIMA-Modells zur Differenzierung entscheidend für die Validität der Ergebnisse.
+* **Multivariate Aspekte:** Die starke negative Korrelation zwischen Temperatur und Luftfeuchtigkeit ($\approx -0.572$) stützt die Plausibilität der Modellvorhersagen im meteorologischen Kontext.
+
+### 4.3 Fazit
+Die Evaluierung bestätigt, dass das gewählte Modell die ausgeprägte **jährliche Saisonalität** im Zeitraum von 2013 bis 2017 erfolgreich abbildet. Durch die methodisch korrekte Handhabung der Autokorrelation erzielen wir eine signifikant höhere Prognosegüte als bei einfachen naiven Verfahren.
+
