@@ -106,18 +106,29 @@ Besonders affällig ist der Luftdruck, weil der Median bei 1008,56 hPa liegt und
 ```{r}
 df %>% summarise(
   min_temp = min(meantemp, na.rm = TRUE),
+  sd_temp = sd(meantemp, na.rm = TRUE),
+  var_temp = var(meantemp, na.rm = TRUE),
   max_temp = max(meantemp, na.rm = TRUE),
   min_hum  = min(humidity, na.rm = TRUE),
+  sd_hum = sd(humidity, na.rm = TRUE),
+  var_hum = var(humidity, na.rm = TRUE),
   max_hum  = max(humidity, na.rm = TRUE),
   min_wind = min(wind_speed, na.rm = TRUE),
+  sd_wind = sd(wind_speed, na.rm = TRUE),
+  var_wind = var(wind_speed, na.rm = TRUE),
   max_wind = max(wind_speed, na.rm = TRUE),
   min_pres = min(meanpressure, na.rm = TRUE),
+  sd_pres = sd(meanpressure, na.rm = TRUE),
+  var_pres = var(meanpressure, na.rm = TRUE),
   max_pres = max(meanpressure, na.rm = TRUE)
 )
 
 # Messfehler/Falsche Daten/etc
 df %>% filter(humidity < 0 | humidity > 100)
 df %>% filter(wind_speed < 0)
+#df %>% filter(meanpressure > 900 & meanpressure < 1100)
+df <- df %>%
+  filter(meanpressure > 900 & meanpressure < 1100)
 
 ```
 
@@ -165,7 +176,34 @@ ggplot(df, aes(date, humidity)) +
 ggplot(df, aes(date, wind_speed)) +  
   geom_line() +
   labs(title = "Zeitreihe: Wind an Datum", x = NULL, y = NULL)
+ggplot(df, aes(date, meanpressure)) +  
+  geom_line() +
+  labs(title = "Zeitreihe: Luftdruck an Datum", x = NULL, y = NULL)
+
 ```
+
+### Durchschnittstemperatur 
+
+Die Zeitreihe der Durchschittstemperatur zeigt eine ausgepägte, widerkehrende saisonale Struktur. In jedem Jahr steigen die Temperatur in den Sommermonaten deutlich an und fallen im Winter wieder ab.
+
+Ein langfristiger Trend ist nicht erkennbar. Es dominiter eine starke periodische Komponente.
+
+### Luftfeuchtigkeit
+
+Es treten Phasen hoher und niedriger Feuchtigkeit auf, was auf wechselnde\
+Wetterbedingungen im Jahresverlauf hinweist. Die Streuung scheint zeitlich\
+nicht konstant zu sein, was auf mögliche Heteroskedastizität hindeuten kann.
+
+### Windgeschwindigkeit 
+
+Die Windgeschwindigkeit zeigt starke kurzfristige Schwankungen mit einzelnen\
+ausgeprägten Spitzen. Eine klare Trendstruktur ist nicht erkennbar.
+
+### Luftdruck
+
+Nach Bereinigung der nicht plausiblen Extremwerte bewegt sich der Luftdruck in einem realistischen Bereich. Die Serie zeigt leichte saisonale Schwankungen ohne extreme Ausreißer.
+
+Die Bereinigung reduziert künstlich erhöhte Varianz und verbessert die ökonometrische Stabilität nachfolgender Schätzungen.
 
 Ausreißer als Histogram
 
@@ -184,8 +222,32 @@ ggplot(df, aes(meantemp, fill = after_stat(x))) +
 
 ggplot(df, aes(humidity)) + geom_histogram(bins = 60)
 ggplot(df, aes(wind_speed)) + geom_histogram(bins = 60)
-
+ggplot(df, aes(meanpressure))+ geom_histogram(bins = 60)
 ```
+
+### Durchschnittstemperatur
+
+as Histogramm der Temperatur zeigt eine leicht asymmetrische Verteilung mit\
+Konzentrationen im unteren (Winter) und oberen (Sommer) Bereich.
+
+### Luftfeuchtigkeit
+
+Die Luftfeuchtigkeit ist breit verteilt mit Schwerpunkt im mittleren Bereich.\
+Extreme Ausreißer sind nicht erkennbar.
+
+### Windgeschwindigkeit
+
+ie Windgeschwindigkeit ist deutlich rechtsschief verteilt.\
+Die meisten Beobachtungen liegen im unteren Bereich, während einzelne\
+hohe Werte als lange rechte Verteilungsschwänze erscheinen.
+
+### Luftdruck
+
+Nach Bereinigung der nicht plausiblen Extremwerte zeigt der Luftdruck\
+eine annähernd symmetrische Verteilung im Bereich zwischen etwa 990 und 1025 hPa.\
+\
+Die Konzentration der Beobachtungen im Bereich um 1000–1015 hPa\
+entspricht typischen atmosphärischen Druckverhältnissen.
 
 Regressionsbaseline
 
@@ -208,6 +270,18 @@ summary(m_ols)
 acf(residuals(m_ols))   # sehr oft: deutliche Autokorrelation
 ```
 
+### Regressionanalyse 
+
+Zur Erklärung der Durchschnittsteperatur wurde ein Lineares OLS-Model geschätzt. Neben meteorologischen Variablen.
+
+R²= 0.924 sagt, dass 92,4% der Variation der Temperatur wird durch Variablen erklärt.
+
+(Luftfeuchtigkeit, Windgeschwindigkeit, Luftdruck) wurden ein quadratischer Zeittrend sowie Monats- und Wochentagseffekte berücksichtigt.
+
+Luftfeuchtigkeit und Windgeschwindigkeit wirken signifikant auf die Temperatur. Luftdruck ist nuch signifikant.
+
+Die Monatsdamies bestetigen die ausgepgte Saisonalität aber dei Wochentagseffekte sind doch nicht da p ist sehr groß.
+
 Korrelationen/Auto-Korrelation
 
 ```{r}
@@ -217,11 +291,21 @@ adf.test(na.omit(df$meantemp))      # H0: unit root (nicht stationär)
 kpss.test(na.omit(df$meantemp))     # H0: stationär
 ```
 
+Beider Tests deuten darauf hin, dass die Temperaturreihe nicht stationär ist.
+
 ```{r}
 df %>%
   select(meantemp, humidity, wind_speed, meanpressure) %>%
   GGally::ggpairs()
 ```
+
+### Koralationserklärung
+
+Die Temperatur weist signifikante negative Korrelationen mit Luftfeuchtigkeit und Luftdruck auf. Zwischen den erklärenden Variablen bestehen ebenfalls Zusammenhänge, was potenziell Multikollinearität implizieren kann.
+
+### Fazit
+
+Die deskriptive Analyse zeigt eine stark saisonale und nicht stationäre Struktur der Temperaturreihe. Eine rein statische Modellierung ist daher nicht ausreichend.
 
 # Seasonal Decomposition of Time Series by Loess/Saison
 
@@ -363,7 +447,7 @@ Zur Beurteilung der Vorhersagegenauigkeit der Zielvariable `meantemp` vergleiche
 -   **MAE (Mean Absolute Error):** Er gibt den durchschnittlichen absoluten Fehler an und ist robuster gegenüber vereinzelten Ausreißern.
 
 | Modell | RMSE | MAE | MPE | MAPE | MASE | RMSSE | ACF1 | Theil's U |
-|:---|:---|:---|:---|:---|:---|:---|:---|:---|
+|:-------|:-------|:-------|:-------|:-------|:-------|:-------|:-------|:-------|
 | **SNAIVE** | 3.597 | 2.871 | -9.006 | 18.067 | 1.000 | 1.000 | 0.880 | 1.003 |
 | **ETS** | 2.503 | 1.956 | -3.733 | 12.353 | 0.681 | 0.696 | 0.528 | 0.692 |
 | **ARIMA** | **2.356** | **1.815** | **-3.136** | **11.454** | **0.632** | **0.655** | **0.469** | **0.654** |
