@@ -1,0 +1,273 @@
+---
+title: "Ökonometrie Aufgabe - Datensatz 2"
+output: html_notebook
+---
+
+
+1) Einlesen des Datensatzes
+
+Wir laden Datensatz2.csv, prüfen Dimensionen und erste Zeilen und stellen sicher, dass das Datum korrekt als Date vorliegt.
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(GGally)
+library(tsibble)
+library(feasts)
+library(tseries)
+library(fable)
+library(fabletools)
+library(purrr)
+library(here)
+```
+
+```{r}
+# Datei einlesen
+df <- read.csv(here("Datensatz2.csv"), sep = ",")
+
+# erster Check
+dim(df)
+head(df)
+```
+
+2) Diagramme und Voraussetzungen
+2.1 Datenbereinigung: Datum + Sortierung + Duplikate + Missing Values
+
+Zuerst bereinigen wir die Daten: Datum korrekt konvertieren, nach Datum sortieren, Duplikate entfernen und fehlende Werte prüfen.
+
+
+```{r}
+# Datum robust setzen (falls date als Text/Zahl kommt)
+df <- df %>%
+  rename(date = 1)
+
+date_raw <- df$date
+
+try_ymd <- as.Date(as.character(date_raw), format = "%Y-%m-%d")
+try_ymd_compact <- as.Date(as.character(date_raw), format = "%Y%m%d")
+try_excel <- as.Date(as.numeric(date_raw), origin = "1899-12-30")
+
+valid_counts <- c(
+  ymd = sum(!is.na(try_ymd)),
+  ymd_compact = sum(!is.na(try_ymd_compact)),
+  excel = sum(!is.na(try_excel))
+)
+valid_counts
+
+best <- names(which.max(valid_counts))
+
+df$date <- dplyr::case_when(
+  best == "ymd" ~ try_ymd,
+  best == "ymd_compact" ~ try_ymd_compact,
+  best == "excel" ~ try_excel,
+  TRUE ~ try_ymd
+)
+
+# WICHTIG: keine NA im Index + sortieren + Duplikate entfernen
+df <- df %>%
+  filter(!is.na(date)) %>%
+  arrange(date) %>%
+  distinct(date, .keep_all = TRUE)
+```
+
+Der Datensatz enthält 1462 Beobachtungen und 5 Variablen. Die Missing-Values sind 0% (laut Output), also ist keine Imputation notwendig.
+
+```{r}
+# Überblick Variablen
+glimpse(df)
+summary(df)
+
+# Zeitraum
+range(df$date)
+
+# Missing Values in Prozent
+df %>%
+  summarise(across(everything(), ~ mean(is.na(.)) * 100)) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "missing_percent")
+```
+
+Zeitraum: 2013-01-01 bis 2017-01-01
+Keine fehlenden Werte (0%)
+meantemp liegt grob zwischen 6.0 und 38.71 (Min/Max)
+
+2.2 Plausibilität / Ausreißer-Check
+
+Wir prüfen, ob die Werte plausibel sind (z.B. Luftfeuchtigkeit 0–100, Wind ≥ 0). Zusätzlich achten wir auf extreme Ausreißer (z.B. Druck).
+
+```{r}
+df %>% summarise(
+  min_temp = min(meantemp, na.rm = TRUE),
+  max_temp = max(meantemp, na.rm = TRUE),
+  min_hum  = min(humidity, na.rm = TRUE),
+  max_hum  = max(humidity, na.rm = TRUE),
+  min_wind = min(wind_speed, na.rm = TRUE),
+  max_wind = max(wind_speed, na.rm = TRUE),
+  min_pres = min(meanpressure, na.rm = TRUE),
+  max_pres = max(meanpressure, na.rm = TRUE)
+)
+
+# offensichtliche Messfehler prüfen
+df %>% filter(humidity < 0 | humidity > 100)
+df %>% filter(wind_speed < 0)
+
+```
+
+humidity liegt im Bereich 13.43–100 → plausibel.
+
+wind_speed hat Min = 0 und keine negativen Werte → plausibel.
+
+meanpressure hat extreme Werte (Min -3.042, Max 7679) → Ausreißer/Skalierungsproblem möglich
+
+2.3 Zeitreihenplots
+
+Wir visualisieren die Zeitreihen, um Trend, Schwankungen und Saisonalität zu erkennen.
+
+```{r}
+ggplot(df, aes(date, meantemp)) +  
+  geom_line() +
+  labs(title = "Zeitreihe: Durchschnittstemperatur", x = NULL, y = NULL)
+
+ggplot(df, aes(date, humidity)) +  
+  geom_line() +
+  labs(title = "Zeitreihe: Luftfeuchtigkeit", x = NULL, y = NULL)
+
+ggplot(df, aes(date, wind_speed)) +  
+  geom_line() +
+  labs(title = "Zeitreihe: Windgeschwindigkeit", x = NULL, y = NULL)
+
+```
+
+meantemp zeigt deutliche wiederkehrende Muster → spricht für starke Saisonalität.
+
+2.4 Histogramme (Verteilung / Ausreißer)
+
+Histogramme zeigen die Verteilung und helfen, Ausreißer zu erkennen.
+
+```{r}
+ggplot(df, aes(meantemp)) + geom_histogram(bins = 60) +
+  labs(title = "Histogramm: meantemp", x = "meantemp", y = "count")
+
+ggplot(df, aes(humidity)) + geom_histogram(bins = 60) +
+  labs(title = "Histogramm: humidity", x = "humidity", y = "count")
+
+ggplot(df, aes(wind_speed)) + geom_histogram(bins = 60) +
+  labs(title = "Histogramm: wind_speed", x = "wind_speed", y = "count")
+```
+
+wind_speed ist rechtsschief (viele kleine Werte, wenige große bis ~42) → Ausreißer möglich, aber nicht zwingend falsch.
+
+2.5 Autokorrelation & Saisonalität (Voraussetzungen)
+
+
+Wir prüfen Autokorrelation (ACF/PACF) und Saisonalität (Season-Plot). Das ist wichtig für ARIMA/ETS und zeigt, ob ein saisonales Modell sinnvoll ist.
+
+```{r}
+tsb <- df %>% as_tsibble(index = date)
+
+# ACF / PACF
+tsb %>% feasts::ACF(meantemp) %>% autoplot()
+tsb %>% feasts::PACF(meantemp) %>% autoplot()
+
+# Saisonplot
+tsb %>% feasts::gg_season(meantemp)
+
+```
+
+Der Season-Plot zeigt starke jährliche Saisonalität: Anstieg ab Jan/Feb, Maximum im Sommer, Abfall ab Herbst. → Saisonale Modelle (SNAIVE/ETS/ARIMA) sind sinnvoll.
+
+2.6 Stationarität (ADF / KPSS)
+
+
+Mit ADF und KPSS testen wir Stationarität. Für ARIMA ist das relevant (Differenzierung kann nötig sein).
+
+```{r}
+adf.test(na.omit(df$meantemp))   # H0: unit root (nicht stationär)
+kpss.test(na.omit(df$meantemp))  # H0: stationär
+```
+
+ADF p = 0.6407 → H0 nicht ablehnen → spricht für nicht stationär.
+
+KPSS p = 0.02469 → H0 ablehnen → ebenfalls Hinweis auf nicht stationär.
+→ ARIMA wird ggf. intern differenzieren (auto.ARIMA macht das meist automatisch).
+
+2.7 Korrelationen (Multivariat)
+
+
+Wir prüfen Zusammenhänge zwischen Variablen (nur deskriptiv).
+
+```{r}
+df %>%
+  select(meantemp, humidity, wind_speed, meanpressure) %>%
+  GGally::ggpairs()
+
+```
+
+meantemp vs humidity: negativ (Corr ≈ -0.572)
+meantemp vs wind_speed: positiv (Corr ≈ 0.306)
+meantemp vs meanpressure: nahe 0 (Corr ≈ -0.039)
+
+3) Durchführung der Zeitreihenanalyse
+3.1 Ziel
+
+In diesem Schritt schätzen wir Zeitreihenmodelle für meantemp und erstellen Prognosen. Wir vergleichen mehrere Modelle, um ein passendes Modell für die saisonale tägliche Zeitreihe zu finden.
+
+3.2 Train/Test Split
+
+Wir teilen die Daten in Trainings- und Testdaten auf. Die letzten 90 Tage werden als Testzeitraum verwendet. So vergleichen wir die Prognosegüte fair.
+
+```{r}
+# tsibble (nochmal sicher)
+tsb <- df %>% as_tsibble(index = date)
+
+# Train/Test Split: letzte 90 Beobachtungen als Test
+n_test <- 90
+n <- nrow(tsb)
+
+train <- tsb %>% slice(1:(n - n_test))
+test  <- tsb %>% slice((n - n_test + 1):n)
+
+```
+
+Modelle werden nur mit Vergangenheit trainiert; die Testperiode simuliert “unbekannte Zukunft”.
+
+3.3 Modelle schätzen (SNAIVE, ETS, ARIMA)
+
+
+Wir vergleichen drei Modelle aus dem Kurs: SNAIVE als Baseline, ETS und ARIMA. Aufgrund der starken Saisonalität erwarten wir, dass saisonale Modelle gut funktionieren.
+
+```{r}
+fit <- train %>%
+  model(
+    snaive = SNAIVE(meantemp),
+    ets    = ETS(meantemp),
+    arima  = ARIMA(meantemp)
+  )
+
+fit
+
+```
+
+SNAIVE ist die einfache Referenz. ETS/ARIMA können Trend/Autokorrelation (und ggf. Saisonalität) flexibler abbilden.
+
+3.4 Forecast erstellen + Plot (Forecast vs Test)
+
+
+Wir erstellen Prognosen für den gesamten Testzeitraum und vergleichen diese visuell mit den tatsächlichen Werten.
+```{r}
+fc <- fit %>% forecast(h = nrow(test))
+
+# Forecast vs. Test
+fc %>% autoplot(train) + autolayer(test, meantemp)
+```
+
+Im Plot sieht man, welches Modell die Testwerte am besten trifft (kleinste Abweichungen).
+
+3.5 Fehlermaße berechnen
+```{r}
+accuracy(fc, test)
+```
+
+Das beste Modell hat die kleinsten Fehler (z.B. RMSE/MAE). SNAIVE dient als Benchmark: ein Modell ist gut, wenn es klar besser ist als SNAIVE.
