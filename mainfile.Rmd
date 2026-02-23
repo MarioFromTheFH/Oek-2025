@@ -21,13 +21,15 @@ library(tseries)
 library(fable)
 library(fabletools)
 library(purrr)
+
+
 ```
 
 Einlesen des Datensatzes
 
 ```{r}
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-df <- read.csv(here("Datensatz2.csv"), sep = ",")
+df <- read.csv("Datensatz2.csv", sep = ",")
 ```
 
 Kleine Überprüfung
@@ -182,7 +184,7 @@ ggplot(df, aes(date, meanpressure)) +
 
 ```
 
-### Durchschnittstemperatur 
+### Durchschnittstemperatur
 
 Die Zeitreihe der Durchschittstemperatur zeigt eine ausgepägte, widerkehrende saisonale Struktur. In jedem Jahr steigen die Temperatur in den Sommermonaten deutlich an und fallen im Winter wieder ab.
 
@@ -194,7 +196,7 @@ Es treten Phasen hoher und niedriger Feuchtigkeit auf, was auf wechselnde\
 Wetterbedingungen im Jahresverlauf hinweist. Die Streuung scheint zeitlich\
 nicht konstant zu sein, was auf mögliche Heteroskedastizität hindeuten kann.
 
-### Windgeschwindigkeit 
+### Windgeschwindigkeit
 
 Die Windgeschwindigkeit zeigt starke kurzfristige Schwankungen mit einzelnen\
 ausgeprägten Spitzen. Eine klare Trendstruktur ist nicht erkennbar.
@@ -270,7 +272,7 @@ summary(m_ols)
 acf(residuals(m_ols))   # sehr oft: deutliche Autokorrelation
 ```
 
-### Regressionanalyse 
+### Regressionanalyse
 
 Zur Erklärung der Durchschnittsteperatur wurde ein Lineares OLS-Model geschätzt. Neben meteorologischen Variablen.
 
@@ -310,12 +312,25 @@ Die deskriptive Analyse zeigt eine stark saisonale und nicht stationäre Struktu
 # Seasonal Decomposition of Time Series by Loess/Saison
 
 ```{r}
-tsb <- df %>% as_tsibble(index = date)
+
+
+tsb <- df %>%
+  mutate(date = as.Date(date)) %>%     # sicherstellen Date-Klasse
+  filter(!is.na(date)) %>%             # falls es NA-Daten gibt
+  group_by(date) %>%                   # falls doppelte Tage existieren
+  summarise(
+    meantemp = mean(meantemp, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(date) %>%
+  as_tsibble(index = date) %>%
+  fill_gaps()
 
 tsb %>%
   model(STL(meantemp ~ season(window = "periodic"))) %>%
   components() %>%
   autoplot()
+
 ```
 
 Multivariate Analysen:
