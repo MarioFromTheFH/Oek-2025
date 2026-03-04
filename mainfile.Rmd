@@ -1,6 +1,7 @@
 ---
 title: "Ökonometrie Aufgabe - Datensatz 2"
 output: html_notebook
+author: "El Brahmi, Lazic, Schwaiger, Zaric"
 ---
 
 Includes und aktuelles Verzeichnis setzen...
@@ -21,7 +22,7 @@ library(tseries)
 library(fable)
 library(fabletools)
 library(purrr)
-
+library(zoo)
 
 ```
 
@@ -154,7 +155,7 @@ Die extrem hohe Varianz des Luftdrucks ist auffällig.\
 Sie wird offensichtlich durch einzelne extreme Ausreißer verursacht.\
 Da typische atmosphärische Druckwerte im Bereich von etwa 950–1050 hPa liegen, sind diese Extremwerte nicht plausibel.
 
-Einfache Plots
+## Einfache Plots
 
 ```{r}
 df_seg <- df %>%
@@ -229,7 +230,7 @@ ggplot(df, aes(meanpressure))+ geom_histogram(bins = 60)
 
 ### Durchschnittstemperatur
 
-as Histogramm der Temperatur zeigt eine leicht asymmetrische Verteilung mit\
+Das Histogramm der Temperatur zeigt eine leicht asymmetrische Verteilung mit\
 Konzentrationen im unteren (Winter) und oberen (Sommer) Bereich.
 
 ### Luftfeuchtigkeit
@@ -313,30 +314,22 @@ Die deskriptive Analyse zeigt eine stark saisonale und nicht stationäre Struktu
 
 ```{r}
 
-
 tsb <- df %>%
-  mutate(date = as.Date(date)) %>%     # sicherstellen Date-Klasse
-  filter(!is.na(date)) %>%             # falls es NA-Daten gibt
-  group_by(date) %>%                   # falls doppelte Tage existieren
+  mutate(date = as.Date(date)) %>%
+  filter(!is.na(date)) %>%
+  group_by(date) %>%
   summarise(
     meantemp = mean(meantemp, na.rm = TRUE),
     .groups = "drop"
   ) %>%
   arrange(date) %>%
   as_tsibble(index = date) %>%
-  fill_gaps()
-
+  fill_gaps() %>%
+  mutate(meantemp = zoo::na.approx(meantemp, na.rm = FALSE))
 tsb %>%
   model(STL(meantemp ~ season(window = "periodic"))) %>%
   components() %>%
   autoplot()
-
-```
-
-Multivariate Analysen:
-
-```{r}
-
 ```
 
 Regression
@@ -355,9 +348,9 @@ ggplot(df_long, aes(date, value)) +
 
 ```
 
-Sehr fad, da saisonal...
+Das ist eigentlich unglaublich langweilg anzusehen, da es sich um saisonale, also sich wiederholdende Daten handelt.
 
-Polynomial
+### Polynomial
 
 ```{r}
 ggplot(df_long, aes(date, value)) +
@@ -368,11 +361,11 @@ ggplot(df_long, aes(date, value)) +
 
 ```
 
-Genauso fad, da immer noch saisonal.
+Andere Darstellungsformen sind nicht viel besser, da die Darstellung auf die Saisonalität keinen Einfluss hat.
 
-Fazit: Regressionen machen bei saisonalen Daten keinen Spaß.
+**Fazit**: Wenn man mit Regressionen arbeitet, sollte man die Daten zuvor "Desaisonalisieren".
 
-2.  Versuch: Glättungen pro Jahr
+Wir schreiten zum 2. Versuch: Glättungen pro Jahr
 
 ```{r}
 df_long <- df %>%
